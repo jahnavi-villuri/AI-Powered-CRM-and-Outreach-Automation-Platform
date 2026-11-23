@@ -212,3 +212,78 @@ export async function getLeadById(id) {
     throw err
   }
 }
+function getAuthenticatedUserId() {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const userStr = localStorage.getItem('auth_user')
+      if (userStr) {
+        const user = JSON.parse(userStr)
+        if (user?.id) return user.id
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return null
+}
+
+export async function claimLead(id, userId = null) {
+  const effectiveUserId = userId || getAuthenticatedUserId()
+
+  if (USE_MOCKS) {
+    if (!effectiveUserId) {
+      throw {
+        status: 401,
+        code: 'UNAUTHORIZED',
+        message: 'User authentication information is unavailable. Please log in again.',
+      }
+    }
+    const lead = MOCK_DATASET.find((l) => l.id === id) || MOCK_LEADS.find((l) => l.id === id)
+    if (!lead) {
+      throw { status: 404, code: 'NOT_FOUND', message: `Lead '${id}' not found` }
+    }
+    if (lead.assigned_to) {
+      throw { status: 409, code: 'CONFLICT', message: 'Lead has already been claimed by another team member' }
+    }
+    lead.assigned_to = effectiveUserId
+    return {
+      id: lead.id,
+      assigned_to: lead.assigned_to,
+      claimed_at: new Date().toISOString(),
+      status: lead.status,
+    }
+  }
+
+  const body = userId ? { user_id: userId } : {}
+
+  try {
+    return await apiClient(`/leads/${id}/claim`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    if (err?.code === 'NETWORK_ERROR') {
+      const lead = MOCK_DATASET.find((l) => l.id === id) || MOCK_LEADS.find((l) => l.id === id)
+      if (lead) {
+        if (!effectiveUserId) {
+          throw {
+            status: 401,
+            code: 'UNAUTHORIZED',
+            message: 'User authentication information is unavailable. Please log in again.',
+          }
+        }
+        if (lead.assigned_to) {
+          throw { status: 409, code: 'CONFLICT', message: 'Lead has already been claimed by another team member' }
+        }
+        lead.assigned_to = effectiveUserId
+        return {
+          id: lead.id,
+          assigned_to: lead.assigned_to,
+          claimed_at: new Date().toISOString(),
+          status: lead.status,
+        }
+      }
+    }
+    throw err
+  }
+}
