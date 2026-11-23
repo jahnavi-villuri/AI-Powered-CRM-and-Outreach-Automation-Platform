@@ -5,11 +5,13 @@ import { ScoreBadge } from '../../components/score/ScoreBadge'
 import { Spinner, EmptyState, ErrorBanner } from '../../components/feedback/Spinner'
 import {
   listLeads,
+  claimLead,
   DEFAULT_PAGE_SIZE,
   DEFAULT_SORT_BY,
   DEFAULT_SORT_ORDER,
   MAX_PAGE_SIZE,
 } from '../../api/leads'
+import { can } from '../../utils/roles'
 
 /**
  * LeadTable (FE-09)
@@ -112,6 +114,25 @@ const TABLE_CSS = `
   border-radius: var(--radius-md); background: var(--color-bg-surface);
   color: var(--color-text-main); font-size: 13px;
 }
+.lt-claim-btn {
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-primary);
+  background-color: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.lt-claim-btn:hover:not(:disabled) {
+  background-color: var(--color-primary);
+  color: #ffffff;
+}
+.lt-claim-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 @media (max-width: 1023px) {
   .lt-pagination { justify-content: center; }
 }
@@ -166,11 +187,20 @@ function SortIcon({ active, order }) {
 export function LeadTable({
   onSelect,
   filters,
-  currentUserId,
+  currentUser,
+  currentUserId: propCurrentUserId,
+  userRole: propUserRole,
   selectedId,
   refreshKey = 0,
   initialPageSize = DEFAULT_PAGE_SIZE,
+  emptyTitle = 'No leads match your criteria',
+  emptyMessage = 'Try adjusting your search terms or filters.',
+  onClaimSuccess,
 }) {
+  const currentUserId = currentUser?.id || propCurrentUserId
+  const userRole = currentUser?.role || propUserRole
+  const canClaim = Boolean(userRole) && can(userRole, 'claim_leads')
+
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(Math.min(initialPageSize, MAX_PAGE_SIZE))
   const [sortBy, setSortBy] = useState(DEFAULT_SORT_BY)
@@ -178,6 +208,8 @@ export function LeadTable({
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [claimError, setClaimError] = useState(null)
+  const [claimingLeadIds, setClaimingLeadIds] = useState(() => new Set())
 
   // Reset to page 1 whenever the filters change (adjusting state during render
   // avoids a wasted fetch for the old page).
@@ -222,6 +254,79 @@ export function LeadTable({
       cancelled = true // ignore out-of-order responses from stale requests
     }
   }, [load, refreshKey])
+
+  async function handleClaim(e, lead) {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (!canClaim || !currentUserId || !lead?.id) return
+    if (claimingLeadIds.has(lead.id)) return
+
+    setClaimError(null)
+    setClaimingLeadIds((prev) => new Set(prev).add(lead.id))
+
+    // 1. Optimistic update: mark as assigned to current user immediately
+    const prevAssignedTo = lead.assigned_to
+    setData((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        items: prev.items.map((item) =>
+          item.id === lead.id ? { ...item, assigned_to: currentUserId } : item
+        ),
+      }
+    })
+
+    try {
+      // 2. Send claim request to backend (self-claims send empty body per API contract)
+      const updated = await claimLead(lead.id)
+
+      // 3. Retain updated state if successful
+      if (updated && updated.assigned_to) {
+        setData((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            items: prev.items.map((item) =>
+              item.id === lead.id
+                ? {
+                    ...item,
+                    assigned_to: updated.assigned_to,
+                    status: updated.status || item.status,
+                  }
+                : item
+            ),
+          }
+        })
+      }
+      onClaimSuccess?.(lead.id, updated)
+    } catch (err) {
+      // 4. Restore previous state if unsuccessful
+      setData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          items: prev.items.map((item) =>
+            item.id === lead.id ? { ...item, assigned_to: prevAssignedTo } : item
+          ),
+        }
+      })
+
+      // 5 & 6. Display clear error banner, handling 409 Conflict specifically
+      const message =
+        err?.status === 409
+          ? 'Lead has already been claimed by another team member.'
+          : err?.message || 'Failed to claim lead. Please try again.'
+      setClaimError(message)
+    } finally {
+      setClaimingLeadIds((prev) => {
+        const next = new Set(prev)
+        next.delete(lead.id)
+        return next
+      })
+    }
+  }
 
   function handleSort(columnKey) {
     if (columnKey === sortBy) {
@@ -275,11 +380,16 @@ export function LeadTable({
       <style>{TABLE_CSS}</style>
 
       {error && <ErrorBanner message={error} onRetry={() => load(() => false)} />}
+      {claimError && (
+        <div style={{ marginBottom: '12px' }}>
+          <ErrorBanner message={claimError} />
+        </div>
+      )}
 
       {total === 0 ? (
         <EmptyState
-          title="No leads match your criteria"
-          message="Try adjusting your search terms or filters."
+          title={emptyTitle}
+          message={emptyMessage}
         />
       ) : (
         <div
@@ -313,6 +423,7 @@ export function LeadTable({
             <tbody style={{ opacity: loading ? 0.55 : 1, transition: 'opacity 0.15s ease' }}>
               {items.map((lead) => {
                 const isMine = currentUserId && lead.assigned_to === currentUserId
+                const isClaiming = claimingLeadIds.has(lead.id)
                 return (
                   <tr
                     key={lead.id}
@@ -355,7 +466,21 @@ export function LeadTable({
                           {lead.assigned_to.length > 10 ? `${lead.assigned_to.slice(0, 8)}…` : lead.assigned_to}
                         </span>
                       ) : (
-                        <span style={{ color: 'var(--color-text-light)' }}>Unassigned</span>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ color: 'var(--color-text-light)' }}>Unassigned</span>
+                          {canClaim && (
+                            <button
+                              type="button"
+                              className="lt-claim-btn"
+                              disabled={isClaiming}
+                              onClick={(e) => handleClaim(e, lead)}
+                              title="Claim this lead"
+                              aria-label={`Claim lead ${lead.organization_name}`}
+                            >
+                              {isClaiming ? 'Claiming…' : 'Claim'}
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td

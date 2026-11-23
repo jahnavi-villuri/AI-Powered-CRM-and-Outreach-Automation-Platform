@@ -134,6 +134,7 @@ export default function LeadPipelinePage({ currentUser }) {
       {view === 'table' ? (
         <LeadTable
           filters={tableFilters}
+          currentUser={currentUser}
           currentUserId={currentUser?.id}
           selectedId={typeof selectedLead === 'object' ? selectedLead?.id : selectedLead}
           refreshKey={refreshKey}

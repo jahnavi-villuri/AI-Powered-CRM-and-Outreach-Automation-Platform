@@ -4,6 +4,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
 import LoginPage from './pages/Login/index'
 import LeadPipelinePage from './pages/LeadPipeline/index'
+import MyLeadsPage from './pages/MyLeads/index'
 import EnrichmentQueuePage from './pages/EnrichmentQueue/index'
 import KitchenSinkPage from './pages/_Kitchen/index'
 import ApprovalPage from './pages/CampaignManager/Approval'
@@ -106,11 +107,7 @@ export default function App() {
             path="/my-leads"
             element={
               currentUser ? (
-                <PlaceholderPage
-                  title="My Assigned Leads (FE-14)"
-                  description="Review and manage fresher opportunities claimed by or assigned to you."
-                  roleRequirement="researcher, admin"
-                />
+                <MyLeadsPage currentUser={currentUser} />
               ) : (
                 <Navigate to="/login" replace />
               )
