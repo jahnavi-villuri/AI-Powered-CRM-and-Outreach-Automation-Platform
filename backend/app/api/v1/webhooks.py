@@ -225,13 +225,3 @@ def scraper_ingest(payload: ScraperIngestPayload):
 
     return {**counts, "errors": sorted(errors, key=lambda e: e["index"])}
 
-
-@router.post("/callbacks")
-def provider_callbacks(
-    payload: dict,
-    x_provider_signature: Optional[str] = Header(None, alias="X-Provider-Signature")
-):
-    """
-    Handles provider callbacks (delivered, reply, bounce, unsubscribe).
-    """
-    return {"status": "received", "event_id": payload.get("provider_event_id")}

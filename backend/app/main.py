@@ -18,6 +18,7 @@ from backend.app.api.v1.campaigns import router as campaigns_router
 from backend.app.api.v1.approvals import router as approvals_router
 from backend.app.api.v1.suppression import router as suppression_router
 from backend.app.api.v1.webhooks import router as webhooks_router
+from backend.app.api.v1.callbacks import router as callbacks_router
 from backend.app.api.v1.error_center import router as error_center_router
 
 
@@ -63,6 +64,7 @@ def create_application() -> FastAPI:
     app.include_router(approvals_router, prefix=api_v1_prefix)
     app.include_router(suppression_router, prefix=api_v1_prefix)
     app.include_router(webhooks_router, prefix=api_v1_prefix)
+    app.include_router(callbacks_router, prefix=api_v1_prefix)
     app.include_router(error_center_router, prefix=api_v1_prefix)
 
     # Root redirect / health convenience
